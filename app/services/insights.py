@@ -5,10 +5,10 @@ from typing import List, Dict
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_TMPL = (
     "あなたは学習支援の専門家です。与えられた学習ノートから"
-    "(1) 不足ポイント（3〜5） (2) 選択式クイズ3問 をJSONで返す。"
-    'スキーマ: {"gaps":[...], "quiz":[{"question":"","choices":["A","B","C","D"],"answer":"A","explanation":""},...]}'
+    "(1) 不足ポイント（3〜5） (2) 選択式クイズ{quiz_n}問 をJSONで返す。"
+    '\nスキーマ: {"gaps":[...], "quiz":[{"question":"","choices":["A","B","C","D"],"answer":"A","explanation":""},...]}'
 )
 
 
@@ -29,11 +29,12 @@ def _extract_json(text: str) -> str:
     return text.replace("```", "").strip()
 
 
-def generate_gaps_and_quiz(summary: str, snippets: List[str]) -> Dict:
+def generate_gaps_and_quiz(summary: str, snippets: List[str], quiz_n: int = 3) -> Dict:
     user = f"【要約】:\n{summary}\n\n【参考メモ（抜粋）】：\n" + "\n---\n".join(snippets[:5])
+    system_prompt = SYSTEM_PROMPT_TMPL.format(quiz_n=max(1, int(quiz_n)))
     res = client.chat.completions.create(
         model=os.getenv("OPENAI_MODEL_CHAT", "gpt-4o-mini"),
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}],
+        messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user}],
         temperature=0.4,
         response_format={"type": "json_object"},
     )

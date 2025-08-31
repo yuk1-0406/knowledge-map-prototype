@@ -115,10 +115,11 @@ if st.button("マップ作成"):
 
 st.header("3) 不足の指摘 & クイズ生成")
 summary = st.text_area("要約（任意）", "これまでの学習の要点...")
+quiz_n = st.slider("クイズ数", 1, 20, 3)
 if st.button("不足/クイズ 生成", type="secondary"):
     results = st.session_state.get("last_results", search(q or "overview", 10))
     snippets = [r["text"][:800] for r in results]
-    data = generate_gaps_and_quiz(summary, snippets)
+    data = generate_gaps_and_quiz(summary, snippets, quiz_n=quiz_n)
     # デバッグ表示（件数と生出力/JSON）
     st.caption(f"不足: {len(data.get('gaps', []))}件 / クイズ: {len(data.get('quiz', []))}問")
     with st.expander("LLM生出力（デバッグ）", expanded=False):

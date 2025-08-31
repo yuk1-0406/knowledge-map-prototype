@@ -21,10 +21,9 @@ def _cosine_sim(u: List[float], v: List[float]) -> float:
     return dot / (math.sqrt(nu) * math.sqrt(nv))
 
 
-def _build_mutual_knn_edges(ids: List[str], embs: Dict[str, List[float]], k: int, thr: float) -> List[Tuple[str, str, float]]:
-    n = len(ids)
-    # Precompute pairwise similarities (upper triangle)
+def _pairwise_sims(ids: List[str], embs: Dict[str, List[float]]) -> Dict[Tuple[int, int], float]:
     sims: Dict[Tuple[int, int], float] = {}
+    n = len(ids)
     for i in range(n):
         ei = embs.get(ids[i])
         if ei is None:
@@ -34,23 +33,27 @@ def _build_mutual_knn_edges(ids: List[str], embs: Dict[str, List[float]], k: int
             if ej is None:
                 continue
             s = _cosine_sim(ei, ej)
-            if s >= thr:
-                sims[(i, j)] = s
-    # For each node, collect neighbors above threshold and keep top-k
+            sims[(i, j)] = s
+    return sims
+
+
+def _build_mutual_knn_edges(ids: List[str], sims: Dict[Tuple[int, int], float], k: int, thr: float) -> List[Tuple[str, str, float]]:
+    n = len(ids)
+    # Collect neighbor lists from sims
     nbrs: List[List[Tuple[int, float]]] = [[] for _ in range(n)]
     for (i, j), s in sims.items():
-        nbrs[i].append((j, s))
-        nbrs[j].append((i, s))
+        if s >= thr:
+            nbrs[i].append((j, s))
+            nbrs[j].append((i, s))
     for i in range(n):
         nbrs[i].sort(key=lambda x: x[1], reverse=True)
         if k > 0:
             del nbrs[i][k:]
-    # Mutual kNN edges
+    # Keep mutual only
     edges: List[Tuple[str, str, float]] = []
     for i in range(n):
-        chosen = {j for j, _ in nbrs[i]}
+        picked = {j for j, _ in nbrs[i]}
         for j, s in nbrs[i]:
-            # Mutual check
             if i in {ii for ii, _ in nbrs[j]}:
                 a, b = ids[i], ids[j]
                 if a < b:
@@ -64,6 +67,7 @@ def build_graph(
     sim_threshold: float = 0.75,
     knn: int = 5,
     include_tooltips: bool = True,
+    min_visual_sim: float = 0.40,
 ):
     # Collect node ids and fetch embeddings from the vector store
     ids = [r["id"] for r in results]
@@ -80,17 +84,35 @@ def build_graph(
         if include_tooltips:
             snippet = (r.get("text", "") or "")[:160].replace("\n", " ")
             tooltip = f"<b>{title}</b><br>{snippet}"
-        # Value/size by degree later; set title for hover
         if tooltip:
             G.add_node(nid, label=title, title=tooltip)
         else:
             G.add_node(nid, label=title)
 
     if use_pairwise and len(ids) >= 2:
-        # Mutual kNN with cosine similarity on embeddings
-        edges = _build_mutual_knn_edges(ids, embs, k=max(1, int(knn)), thr=float(sim_threshold))
-        for a, b, s in edges:
-            G.add_edge(a, b, weight=s)
+        # Compute all pairwise similarities once
+        sims = _pairwise_sims(ids, embs)
+        # Strong edges: mutual kNN above threshold
+        strong_edges = _build_mutual_knn_edges(ids, sims, k=max(1, int(knn)), thr=float(sim_threshold))
+        strong_set = {(a, b) if a < b else (b, a) for a, b, _ in strong_edges}
+        for a, b, s in strong_edges:
+            # width/value scaled by similarity among strong range
+            value = 3 + 5 * max(0.0, (s - sim_threshold) / max(1e-6, 1.0 - sim_threshold))
+            G.add_edge(a, b, weight=s, value=value, color="rgba(60,60,60,0.85)", title=f"sim: {s:.2f}")
+        # Weak edges: show faint links above min_visual_sim (not necessarily mutual), avoid duplicates
+        for (i, j), s in sims.items():
+            if s < min_visual_sim:
+                continue
+            a, b = ids[i], ids[j]
+            key = (a, b) if a < b else (b, a)
+            if key in strong_set:
+                continue
+            # Thin, dashed, transparent
+            t = (s - min_visual_sim) / max(1e-6, (sim_threshold - min_visual_sim))
+            t = max(0.0, min(1.0, t))
+            alpha = 0.15 + 0.35 * t  # 0.15–0.50
+            value = 1 + 3 * t        # 1–4
+            G.add_edge(a, b, weight=s, value=value, color=f"rgba(120,120,120,{alpha:.2f})", dashes=True, title=f"sim: {s:.2f}")
     else:
         # Degrade to similarity based on distance difference (original behavior)
         for i, a in enumerate(results):
@@ -100,7 +122,8 @@ def build_graph(
                 sb = b.get(score_key) or 0.5
                 s = 1.0 - abs(sa - sb)
                 if s >= 0.7:
-                    G.add_edge(a["id"], b["id"], weight=s)
+                    value = 1 + 4 * (s - 0.7) / 0.3
+                    G.add_edge(a["id"], b["id"], weight=s, value=value, color="rgba(120,120,120,0.5)", title=f"sim*: {s:.2f}")
 
     # Color by communities (greedy modularity); fallback to connected components
     colors = [
@@ -143,7 +166,7 @@ def build_graph(
           "edges": {
             "smooth": { "type": "dynamic" },
             "color": { "inherit": false },
-            "scaling": { "min": 1, "max": 5 }
+            "scaling": { "min": 1, "max": 6 }
           },
           "nodes": {
             "shape": "dot",
