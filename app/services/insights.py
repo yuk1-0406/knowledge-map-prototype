@@ -5,10 +5,11 @@ from typing import List, Dict
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Note: Double braces {{ }} are required to keep literal braces when using str.format
 SYSTEM_PROMPT_TMPL = (
     "あなたは学習支援の専門家です。与えられた学習ノートから"
     "(1) 不足ポイント（3〜5） (2) 選択式クイズ{quiz_n}問 をJSONで返す。"
-    '\nスキーマ: {"gaps":[...], "quiz":[{"question":"","choices":["A","B","C","D"],"answer":"A","explanation":""},...]}'
+    '\nスキーマ: {{"gaps":[...], "quiz":[{{"question":"","choices":["A","B","C","D"],"answer":"A","explanation":""}},...]}}'
 )
 
 
@@ -30,7 +31,7 @@ def _extract_json(text: str) -> str:
 
 
 def generate_gaps_and_quiz(summary: str, snippets: List[str], quiz_n: int = 3) -> Dict:
-    user = f"【要約】:\n{summary}\n\n【参考メモ（抜粋）】：\n" + "\n---\n".join(snippets[:5])
+    user = f"【要約】：\n{summary}\n\n【参考メモ（抜粋）】：\n" + "\n---\n".join(snippets[:5])
     system_prompt = SYSTEM_PROMPT_TMPL.format(quiz_n=max(1, int(quiz_n)))
     res = client.chat.completions.create(
         model=os.getenv("OPENAI_MODEL_CHAT", "gpt-4o-mini"),
