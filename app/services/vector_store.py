@@ -6,10 +6,12 @@ from .embeddings import get_embedding
 _client = None
 _collection = None
 
+
 def init_store(persist_dir: str = "app/data/chroma"):
     global _client, _collection
     _client = chromadb.Client(Settings(persist_directory=persist_dir))
     _collection = _client.get_or_create_collection(name="notes")
+
 
 def upsert_texts(items: List[Dict]):
     embeddings = [get_embedding(x["text"]) for x in items]
@@ -17,8 +19,9 @@ def upsert_texts(items: List[Dict]):
         ids=[x["id"] for x in items],
         documents=[x["text"] for x in items],
         metadatas=[x.get("meta", {}) for x in items],
-        embeddings=embeddings
+        embeddings=embeddings,
     )
+
 
 def search(query: str, top_k: int = 10) -> List[Dict]:
     qemb = get_embedding(query)
@@ -27,15 +30,16 @@ def search(query: str, top_k: int = 10) -> List[Dict]:
     ids = res.get("ids", [[]])[0]
     docs = res.get("documents", [[]])[0]
     metas = res.get("metadatas", [[]])[0]
-    distances = res.get("distances", [[]])[0] if "distances" in res else [None]*len(ids)
+    distances = res.get("distances", [[]])[0] if "distances" in res else [None] * len(ids)
     for i in range(len(ids)):
         out.append({
             "id": ids[i],
             "text": docs[i],
             "score": float(distances[i]) if distances[i] is not None else None,
-            "meta": metas[i]
+            "meta": metas[i],
         })
     return out
+
 
 # --- Helpers for inspecting DB state ---
 
@@ -75,6 +79,34 @@ def list_items(limit: int = 50, offset: int = 0) -> List[Dict]:
         meta = metas[i] if i < len(metas) else {}
         items.append({"id": _id, "text": doc, "meta": meta})
     return items
+
+
+def get_embeddings_by_ids(ids: List[str]) -> Dict[str, List[float]]:
+    """Return a mapping from id -> embedding for the given ids."""
+    if _collection is None or not ids:
+        return {}
+    # Ensure unique ids but preserve request set
+    req_ids = list(dict.fromkeys(ids))
+    res = None
+    try:
+        res = _collection.get(ids=req_ids, include=["embeddings"])  # Chroma 0.5.x
+    except TypeError:
+        # Older signature without include
+        res = _collection.get(ids=req_ids)
+    if not isinstance(res, dict):
+        return {}
+    out: Dict[str, List[float]] = {}
+    got_ids = res.get("ids", []) if isinstance(res.get("ids", []), list) else []
+    embs = res.get("embeddings", []) if isinstance(res.get("embeddings", []), list) else []
+    for i, _id in enumerate(got_ids):
+        try:
+            emb = embs[i]
+            if isinstance(emb, list):
+                out[_id] = emb
+        except Exception:
+            continue
+    return out
+
 
 # --- Deletion helpers ---
 
