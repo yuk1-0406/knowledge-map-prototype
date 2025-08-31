@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Create venv",
+      "type": "shell",
+      "command": "python -m venv .venv",
+      "problemMatcher": []
+    },
+    {
+      "label": "Install requirements",
+      "type": "shell",
+      "command": ".venv/bin/python -m pip install -r requirements.txt",
+      "problemMatcher": [],
+      "dependsOn": "Create venv"
+    },
+    {
+      "label": "Run Streamlit",
+      "type": "shell",
+      "command": "source .venv/bin/activate && streamlit run app/streamlit_app.py",
+      "problemMatcher": [],
+      "dependsOn": "Install requirements"
+    }
+  ]
+}
